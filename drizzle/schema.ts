@@ -2,70 +2,77 @@ import {
   bigint,
   boolean,
   decimal,
-  int,
-  mysqlEnum,
-  mysqlTable,
+  integer,
+  pgEnum,
+  pgTable,
+  serial,
   text,
   timestamp,
   varchar,
-} from "drizzle-orm/mysql-core";
+} from "drizzle-orm/pg-core";
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "completed", "failed", "refunded"]);
+export const txTypeEnum = pgEnum("tx_type", ["purchase", "spin_debit", "spin_win", "bonus", "admin_credit"]);
+export const redemptionStatusEnum = pgEnum("redemption_status", ["pending", "processing", "shipped", "delivered", "cancelled"]);
 
 // ─── USERS ────────────────────────────────────────────────────────────────────
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  role: userRoleEnum("role").default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
 // ─── WALLETS ──────────────────────────────────────────────────────────────────
 // Monedas = para jugar. Puntos = para canjear. NUNCA mezclar.
-export const wallets = mysqlTable("wallets", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().unique(),
+export const wallets = pgTable("wallets", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().unique(),
   coins: bigint("coins", { mode: "number" }).default(0).notNull(),
   points: bigint("points", { mode: "number" }).default(0).notNull(),
   totalCoinsSpent: bigint("totalCoinsSpent", { mode: "number" }).default(0).notNull(),
   totalPointsEarned: bigint("totalPointsEarned", { mode: "number" }).default(0).notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 // ─── CREDIT PACKAGES ──────────────────────────────────────────────────────────
-export const creditPackages = mysqlTable("credit_packages", {
-  id: int("id").autoincrement().primaryKey(),
+export const creditPackages = pgTable("credit_packages", {
+  id: serial("id").primaryKey(),
   name: varchar("name", { length: 128 }).notNull(),
-  coins: int("coins").notNull(),
+  coins: integer("coins").notNull(),
   priceUsd: decimal("priceUsd", { precision: 10, scale: 2 }).notNull(),
-  bonusCoins: int("bonusCoins").default(0).notNull(),
+  bonusCoins: integer("bonusCoins").default(0).notNull(),
   isPopular: boolean("isPopular").default(false).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
-  sortOrder: int("sortOrder").default(0).notNull(),
+  sortOrder: integer("sortOrder").default(0).notNull(),
 });
 
 // ─── PAYMENT ORDERS ───────────────────────────────────────────────────────────
-export const paymentOrders = mysqlTable("payment_orders", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  packageId: int("packageId").notNull(),
+export const paymentOrders = pgTable("payment_orders", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  packageId: integer("packageId").notNull(),
   paypalOrderId: varchar("paypalOrderId", { length: 128 }),
-  status: mysqlEnum("status", ["pending", "completed", "failed", "refunded"]).default("pending").notNull(),
+  status: paymentStatusEnum("status").default("pending").notNull(),
   amountUsd: decimal("amountUsd", { precision: 10, scale: 2 }).notNull(),
-  coinsToCredit: int("coinsToCredit").notNull(),
+  coinsToCredit: integer("coinsToCredit").notNull(),
   creditedAt: timestamp("creditedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 // ─── COIN TRANSACTIONS ────────────────────────────────────────────────────────
-export const coinTransactions = mysqlTable("coin_transactions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  type: mysqlEnum("type", ["purchase", "spin_debit", "spin_win", "bonus", "admin_credit"]).notNull(),
+export const coinTransactions = pgTable("coin_transactions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  type: txTypeEnum("type").notNull(),
   amount: bigint("amount", { mode: "number" }).notNull(),
   balanceAfter: bigint("balanceAfter", { mode: "number" }).notNull(),
   referenceId: varchar("referenceId", { length: 128 }),
@@ -74,12 +81,12 @@ export const coinTransactions = mysqlTable("coin_transactions", {
 });
 
 // ─── SPIN HISTORY ─────────────────────────────────────────────────────────────
-export const spinHistory = mysqlTable("spin_history", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  betCoins: int("betCoins").notNull(),
-  winCoins: int("winCoins").default(0).notNull(),
-  pointsEarned: int("pointsEarned").default(0).notNull(),
+export const spinHistory = pgTable("spin_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  betCoins: integer("betCoins").notNull(),
+  winCoins: integer("winCoins").default(0).notNull(),
+  pointsEarned: integer("pointsEarned").default(0).notNull(),
   reels: text("reels").notNull(),
   isJackpot: boolean("isJackpot").default(false).notNull(),
   isFreeSpins: boolean("isFreeSpins").default(false).notNull(),
@@ -88,26 +95,26 @@ export const spinHistory = mysqlTable("spin_history", {
 });
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
-export const products = mysqlTable("products", {
-  id: int("id").autoincrement().primaryKey(),
+export const products = pgTable("products", {
+  id: serial("id").primaryKey(),
   name: varchar("name", { length: 256 }).notNull(),
   description: text("description"),
   imageUrl: text("imageUrl"),
-  pointsCost: int("pointsCost").notNull(),
-  stock: int("stock").default(0).notNull(),
+  pointsCost: integer("pointsCost").notNull(),
+  stock: integer("stock").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   category: varchar("category", { length: 64 }).default("merch").notNull(),
-  sortOrder: int("sortOrder").default(0).notNull(),
+  sortOrder: integer("sortOrder").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 // ─── REDEMPTIONS ──────────────────────────────────────────────────────────────
-export const redemptions = mysqlTable("redemptions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  productId: int("productId").notNull(),
-  pointsSpent: int("pointsSpent").notNull(),
-  status: mysqlEnum("status", ["pending", "processing", "shipped", "delivered", "cancelled"]).default("pending").notNull(),
+export const redemptions = pgTable("redemptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  productId: integer("productId").notNull(),
+  pointsSpent: integer("pointsSpent").notNull(),
+  status: redemptionStatusEnum("status").default("pending").notNull(),
   shippingName: text("shippingName"),
   shippingAddress: text("shippingAddress"),
   shippingCity: text("shippingCity"),
@@ -115,16 +122,16 @@ export const redemptions = mysqlTable("redemptions", {
   trackingNumber: varchar("trackingNumber", { length: 128 }),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 // ─── JACKPOT ──────────────────────────────────────────────────────────────────
-export const jackpot = mysqlTable("jackpot", {
-  id: int("id").autoincrement().primaryKey(),
+export const jackpot = pgTable("jackpot", {
+  id: serial("id").primaryKey(),
   currentAmount: bigint("currentAmount", { mode: "number" }).default(125000).notNull(),
   lastWonAt: timestamp("lastWonAt"),
-  lastWonBy: int("lastWonBy"),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastWonBy: integer("lastWonBy"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────

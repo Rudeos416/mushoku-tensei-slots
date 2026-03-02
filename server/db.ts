@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/node-postgres";
 import {
   InsertUser,
   coinTransactions,
@@ -30,28 +30,31 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  const values: InsertUser = { openId: user.openId };
-  const updateSet: Record<string, unknown> = {};
-  const textFields = ["name", "email", "loginMethod"] as const;
-  textFields.forEach((field) => {
-    const value = user[field];
-    if (value === undefined) return;
-    const normalized = value ?? null;
-    values[field] = normalized;
-    updateSet[field] = normalized;
-  });
-  if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
-  if (user.role !== undefined) { values.role = user.role; updateSet.role = user.role; }
-  else if (user.openId === ENV.ownerOpenId) { values.role = "admin"; updateSet.role = "admin"; }
-  if (!values.lastSignedIn) values.lastSignedIn = new Date();
-  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
+  const role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
+  const now = new Date();
 
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.insert(users).values({
+    openId: user.openId,
+    name: user.name ?? null,
+    email: user.email ?? null,
+    loginMethod: user.loginMethod ?? null,
+    role,
+    lastSignedIn: user.lastSignedIn ?? now,
+  }).onConflictDoUpdate({
+    target: users.openId,
+    set: {
+      name: user.name ?? null,
+      email: user.email ?? null,
+      loginMethod: user.loginMethod ?? null,
+      lastSignedIn: user.lastSignedIn ?? now,
+      updatedAt: now,
+    },
+  });
 
   const existing = await db.select().from(users).where(eq(users.openId, user.openId)).limit(1);
   if (existing[0]) {
     await db.insert(wallets).values({ userId: existing[0].id, coins: 0, points: 0 })
-      .onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+      .onConflictDoNothing();
   }
 }
 
@@ -68,7 +71,7 @@ export async function getWallet(userId: number) {
   if (!db) return null;
   const result = await db.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
   if (!result[0]) {
-    await db.insert(wallets).values({ userId, coins: 0, points: 0 }).onDuplicateKeyUpdate({ set: { updatedAt: new Date() } });
+    await db.insert(wallets).values({ userId, coins: 0, points: 0 }).onConflictDoNothing();
     return { userId, coins: 0, points: 0, totalCoinsSpent: 0, totalPointsEarned: 0 };
   }
   return result[0];
@@ -77,7 +80,7 @@ export async function getWallet(userId: number) {
 export async function creditCoins(userId: number, amount: number, type: "purchase" | "spin_debit" | "spin_win" | "bonus" | "admin_credit", referenceId?: string, description?: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(wallets).set({ coins: sql`coins + ${amount}` }).where(eq(wallets.userId, userId));
+  await db.update(wallets).set({ coins: sql`coins + ${amount}`, updatedAt: new Date() }).where(eq(wallets.userId, userId));
   const wallet = await getWallet(userId);
   await db.insert(coinTransactions).values({ userId, type, amount, balanceAfter: wallet?.coins ?? 0, referenceId: referenceId ?? null, description: description ?? null });
 }
@@ -87,7 +90,7 @@ export async function debitCoins(userId: number, amount: number): Promise<{ succ
   if (!db) throw new Error("DB not available");
   const wallet = await getWallet(userId);
   if (!wallet || wallet.coins < amount) return { success: false, newBalance: wallet?.coins ?? 0 };
-  await db.update(wallets).set({ coins: sql`coins - ${amount}`, totalCoinsSpent: sql`totalCoinsSpent + ${amount}` }).where(eq(wallets.userId, userId));
+  await db.update(wallets).set({ coins: sql`coins - ${amount}`, totalCoinsSpent: sql`"totalCoinsSpent" + ${amount}`, updatedAt: new Date() }).where(eq(wallets.userId, userId));
   const updated = await getWallet(userId);
   return { success: true, newBalance: updated?.coins ?? 0 };
 }
@@ -95,7 +98,7 @@ export async function debitCoins(userId: number, amount: number): Promise<{ succ
 export async function creditPoints(userId: number, points: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(wallets).set({ points: sql`points + ${points}`, totalPointsEarned: sql`totalPointsEarned + ${points}` }).where(eq(wallets.userId, userId));
+  await db.update(wallets).set({ points: sql`points + ${points}`, totalPointsEarned: sql`"totalPointsEarned" + ${points}`, updatedAt: new Date() }).where(eq(wallets.userId, userId));
 }
 
 export async function debitPoints(userId: number, points: number): Promise<boolean> {
@@ -103,7 +106,7 @@ export async function debitPoints(userId: number, points: number): Promise<boole
   if (!db) throw new Error("DB not available");
   const wallet = await getWallet(userId);
   if (!wallet || wallet.points < points) return false;
-  await db.update(wallets).set({ points: sql`points - ${points}` }).where(eq(wallets.userId, userId));
+  await db.update(wallets).set({ points: sql`points - ${points}`, updatedAt: new Date() }).where(eq(wallets.userId, userId));
   return true;
 }
 
@@ -140,7 +143,7 @@ export async function completePaymentOrder(paypalOrderId: string): Promise<{ use
     .where(and(eq(paymentOrders.paypalOrderId, paypalOrderId), eq(paymentOrders.status, "pending"))).limit(1);
   if (!orders[0]) return null;
   const order = orders[0];
-  await db.update(paymentOrders).set({ status: "completed", creditedAt: new Date() }).where(eq(paymentOrders.paypalOrderId, paypalOrderId));
+  await db.update(paymentOrders).set({ status: "completed", creditedAt: new Date(), updatedAt: new Date() }).where(eq(paymentOrders.paypalOrderId, paypalOrderId));
   await creditCoins(order.userId, order.coinsToCredit, "purchase", paypalOrderId, `Compra de créditos — PayPal ${paypalOrderId}`);
   return { userId: order.userId, coinsToCredit: order.coinsToCredit };
 }
@@ -172,13 +175,13 @@ export async function incrementJackpot(amount: number) {
   if (!db) return;
   const rows = await db.select().from(jackpot).limit(1);
   if (!rows[0]) { await db.insert(jackpot).values({ currentAmount: 125000 + amount }); }
-  else { await db.update(jackpot).set({ currentAmount: sql`currentAmount + ${amount}` }); }
+  else { await db.update(jackpot).set({ currentAmount: sql`"currentAmount" + ${amount}`, updatedAt: new Date() }); }
 }
 
 export async function resetJackpot(wonByUserId: number) {
   const db = await getDb();
   if (!db) return;
-  await db.update(jackpot).set({ currentAmount: 50000, lastWonAt: new Date(), lastWonBy: wonByUserId });
+  await db.update(jackpot).set({ currentAmount: 50000, lastWonAt: new Date(), lastWonBy: wonByUserId, updatedAt: new Date() });
 }
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
